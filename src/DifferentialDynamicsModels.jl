@@ -17,9 +17,9 @@ include("utils.jl")
 
 # States, Controls, Dynamics, Cost Functionals, and Control Intervals
 abstract type AbstractState end
-const State = Union{AbstractState, AbstractVector{<:Number}}
+const State = Union{AbstractState,AbstractVector{<:Number},SVector{<:Number}}
 abstract type AbstractControl end
-const Control = Union{AbstractControl, AbstractVector{<:Number}}
+const Control = Union{AbstractControl,AbstractVector{<:Number},SVector{<:Number}}
 abstract type DifferentialDynamics end
 abstract type CostFunctional end
 struct Time <: CostFunctional end
@@ -32,7 +32,7 @@ Base.zero(::CI) where {CI<:ControlInterval} = zero(CI)
 
 (::Time)(c) = duration(c)
 duration(cs) = sum(duration(c) for c in cs)
-# (cost::CostFunctional)(cs) = sum(cost(c) for c in cs)    # JuliaLang/julia#29440
+(cost::CostFunctional)(cs) = sum(cost(c) for c in cs)    # JuliaLang/julia#29440
 (cost::TimePlusQuadraticControl)(cs) = sum(cost(c) for c in cs)
 
 # State/Control Sequences
@@ -58,8 +58,8 @@ waypoints(f::DifferentialDynamics, x::State, cs, dt_or_N) = collect(waypoints_it
 
 # Control Intervals
 function propagate_ode(f::DifferentialDynamics, x::State, c::ControlInterval, s::Number=duration(c); N=10)
-    s > 0 ? ode_rk4((y, t) ->  f(y, instantaneous_control(c,  t)), x,  s, zero(s), N) :
-            ode_rk4((y, t) -> -f(y, instantaneous_control(c, -t)), x, -s, zero(s), N)
+    s > 0 ? ode_rk4((y, t) -> f(y, instantaneous_control(c, t)), x, s, zero(s), N) :
+    ode_rk4((y, t) -> -f(y, instantaneous_control(c, -t)), x, -s, zero(s), N)
 end
 propagate(f::DifferentialDynamics, x::State, c::ControlInterval) = propagate_ode(f, x, c)    # general fallback
 
@@ -75,12 +75,12 @@ const ZeroOrderHoldControl{N,T,S} = StepControl{N,T,S}
 duration(c::StepControl) = c.t
 Base.zero(::Type{StepControl{N,T,S}}) where {N,T,S} = StepControl(zero(T), zero(S))
 function propagate(f::DifferentialDynamics, x::State, c::StepControl, s::Number)
-    s <= 0           ? x :
-    s >= duration(c) ? propagate(f, x, c) :
-                       propagate(f, x, StepControl(s, c.u))
+    s <= 0 ? x :
+    #s >= duration(c) ? propagate(f, x, c) :
+    propagate(f, x, StepControl(s, c.u))
 end
 instantaneous_control(c::StepControl, s::Number) = c.u
-(cost::TimePlusQuadraticControl)(c::StepControl) = c.t*(1 + c.u'*cost.R*c.u)
+(cost::TimePlusQuadraticControl)(c::StepControl) = c.t * (1 + c.u' * cost.R * c.u)
 
 ## Ramp Control
 struct RampControl{N,T,S0<:StaticVector{N},Sf<:StaticVector{N}} <: ControlInterval
@@ -96,12 +96,12 @@ RampControl(c::StepControl) = RampControl(c.t, c.u, c.u)
 duration(c::RampControl) = c.t
 Base.zero(::Type{RampControl{N,T,S0,Sf}}) where {N,T,S0,Sf} = RampControl(zero(T), zero(S0), zero(Sf))
 function propagate(f::DifferentialDynamics, x::State, c::RampControl, s::Number)
-    s <= 0           ? x :
+    s <= 0 ? x :
     s >= duration(c) ? propagate(f, x, c) :
-                       propagate(f, x, RampControl(s, c.u0, instantaneous_control(c, s)))
+    propagate(f, x, RampControl(s, c.u0, instantaneous_control(c, s)))
 end
-instantaneous_control(c::RampControl, s::Number) = c.u0 + (s/c.t)*(c.uf - c.u0)
-(cost::TimePlusQuadraticControl)(c::RampControl) = (Δu = c.uf - c.u0; c.t*(1 + c.u0'*cost.R*c.uf + Δu'*cost.R*Δu/3))
+instantaneous_control(c::RampControl, s::Number) = c.u0 + (s / c.t) * (c.uf - c.u0)
+(cost::TimePlusQuadraticControl)(c::RampControl) = (Δu = c.uf - c.u0; c.t * (1 + c.u0' * cost.R * c.uf + Δu' * cost.R * Δu / 3))
 
 ## BVP Control
 struct BVPControl{T,S0<:State,Sf<:State,Fx<:Function,Fu<:Function} <: ControlInterval
@@ -119,7 +119,7 @@ propagate(f::DifferentialDynamics, x::State, c::BVPControl) = (x - c.x0) + c.xf
 propagate(f::DifferentialDynamics, x::State, c::BVPControl, s::Number) = (x - c.x0) + c.x(c.x0, c.xf, c.t, s)
 instantaneous_control(c::BVPControl, s::Number) = c.u(c.x0, c.xf, c.t, s)
 function (cost::TimePlusQuadraticControl)(c::BVPControl{T}; N=10) where {T}
-    c.t + ode_rk4((y, t) -> (u = instantaneous_control(c, t); u'*cost.R*u), zero(T), c.t, zero(T), N)
+    c.t + ode_rk4((y, t) -> (u = instantaneous_control(c, t); u' * cost.R * u), zero(T), c.t, zero(T), N)
 end
 
 # Steering Two-Point Boundary Value Problems (BVPs)
@@ -139,32 +139,60 @@ struct SteeringBVP{D<:DifferentialDynamics,C<:CostFunctional,SC<:SteeringConstra
     cache::SD
 end
 function SteeringBVP(dynamics::DifferentialDynamics, cost::CostFunctional;
-                     constraints::SteeringConstraints=EmptySteeringConstraints(),
-                     cache::SteeringCache=EmptySteeringCache())
+    constraints::SteeringConstraints=EmptySteeringConstraints(),
+    cache::SteeringCache=EmptySteeringCache())
     SteeringBVP(dynamics, cost, constraints, cache)
 end
-LinearAlgebra.issymmetric(bvp::SteeringBVP) = false                           # general fallback
-(bvp::SteeringBVP)(x0::State, xf::State, cost_bound::Number) = bvp(x0, xf)    # general fallback
-
+LinearAlgebra.issymmetric(bvp::SteeringBVP) = false
 # Single Integrator
 struct SingleIntegratorDynamics{N} <: DifferentialDynamics end
 
 state_dim(::SingleIntegratorDynamics{N}) where {N} = N
 control_dim(::SingleIntegratorDynamics{N}) where {N} = N
 
+
 (::SingleIntegratorDynamics{N})(x::StaticVector{N}, u::StaticVector{N}) where {N} = u
-propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::StepControl{N}) where {N} = x + c.t*c.u
-propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::RampControl{N}) where {N} = x + c.t*(c.u0 + c.uf)/2
+propagate(f::SingleIntegratorDynamics{N}, x::State, c::StepControl) where {N} = x + c.t * c.u
+# do not be fooled by the uniform motion formula, this moves maximum by a radius 
+propagate(f::SingleIntegratorDynamics{N}, x::State, c::RampControl{N}) where {N} = x + c.t * (c.u0 + c.uf) / 2
+#propagate(f::SingleIntegratorDynamics{N}, x::State, c::StepControl{N})
 
 LinearAlgebra.issymmetric(bvp::SteeringBVP{<:SingleIntegratorDynamics,<:CostFunctional,<:BoundedControlNorm}) = true
-const GeometricSteering{N,T} = SteeringBVP{SingleIntegratorDynamics{N},Time,BoundedControlNorm{2,T}}
+
+# GeometricSteering = Planning a Grafo
+const GeometricSteering{N,T} = SteeringBVP{SingleIntegratorDynamics{N},Time,BoundedControlNorm{2,T},SteeringCache}
 const SingleIntegratorSteering{N,T} = GeometricSteering{N,T}
 GeometricSteering{N}(b=1) where {N} = SteeringBVP(SingleIntegratorDynamics{N}(), Time(), constraints=BoundedControlNorm(b))
 GeometricSteering(N, b=1) = GeometricSteering{N}(b)
-function (bvp::GeometricSteering{N})(x0::StaticVector{N}, xf::StaticVector{N}) where {N}
-    c = norm(xf - x0)/bvp.constraints.b
-    ctrl = StepControl(c, SVector((xf - x0)*(c > 0 ? inv(c) : 0)))    # @benchmark appears faster than ifelse
+
+## BVP functions definition
+
+#general fallback
+#(bvp::SteeringBVP)(x0::State, xf::State, cost_bound::Number=100.0) = (bvp::SteeringBVP)(x0, xf)
+
+# 
+(bvp::SteeringBVP{<:DifferentialDynamics,<:CostFunctional,<:SteeringConstraints,<:SteeringCache})(x0::State, xf::State) = getcostandcontrol(bvp.dynamics, bvp.cost, bvp.constraints, bvp.cache, x0, xf)
+
+(bvp::SteeringBVP{<:DifferentialDynamics,<:CostFunctional,<:SteeringConstraints,<:SteeringCache})(x0::State, xf::State, cost_bound::Missing) = getcostandcontrol(bvp.dynamics, bvp.cost, bvp.constraints, bvp.cache, x0, xf)
+
+(bvp::SteeringBVP{<:DifferentialDynamics,<:CostFunctional,<:SteeringConstraints,<:SteeringCache})(x0::State, xf::State, cost_bound::T) where {T} = getcostandcontrol(bvp.dynamics, bvp.cost, bvp.constraints, bvp.cache, x0, xf, cost_bound)
+
+
+function getcostandcontrol(dynamics::SingleIntegratorDynamics{N}, cost::Time, constraints, cache, x0::State, xf::State) where {N}
+
+    # "Time" in this case is the number of potential steps to reach xf in a straight line, so the norm ratio the maximum radius (given by a spherical bound)  
+    c = norm(xf - x0) / constraints.b
+    ctrl = StepControl(c, SVector{size(x0)[1]}((xf - x0) * (c > 0 ? inv(c) : 0)))    # @benchmark appears faster than ifelse
     (cost=c, controls=ctrl)
 end
+getcostandcontrol(dynamics::SingleIntegratorDynamics{N}, cost::Time, constraints, cache, x0::State, xf::State, cost_bound::T) where {N,T} = getcostandcontrol(dynamics::SingleIntegratorDynamics{N}, cost::Time, constraints, cache, x0::State, xf::State)
+
+
+#= function (bvp::GeometricSteering{N})(x0::StaticVector{N}, xf::StaticVector{N}) where {N}
+    c = norm(xf - x0) / bvp.constraints.b
+    ctrl = StepControl(c, SVector((xf - x0) * (c > 0 ? inv(c) : 0)))    # @benchmark appears faster than ifelse
+    (cost=c, controls=ctrl)
+end =#
+
 
 end # module

@@ -16,33 +16,33 @@ macro maintain_type(expr)    # ensures that subtypes of StaticArrays.FieldVector
 end
 
 function ode_heun(fn, y0, Tf, Ti=zero(Tf), N=10)
-    dt = (Tf - Ti)/N
+    dt = (Tf - Ti) / N
     y = y0
     t = Ti
     for i in 1:N
-        k1 = dt*fn(y, t)
-        k2 = dt*fn(y + k1, t + dt)
-        y = y + (k1 + k2)/2
+        k1 = dt * fn(y, t)
+        k2 = dt * fn(y + k1, t + dt)
+        y = y + (k1 + k2) / 2
         t = t + dt
     end
     y
 end
 
 function ode_rk4(fn, y0, Tf, Ti=zero(Tf), N=10)
-    dt = (Tf - Ti)/N
+    dt = (Tf - Ti) / N
     y = y0
     t = Ti
     for i in 1:N
-        k1 = dt*fn(y, t)
-        k2 = dt*fn(y + k1/2, t + dt/2)
-        k3 = dt*fn(y + k2/2, t + dt/2)
-        k4 = dt*fn(y + k3, t + dt)
-        y = y + (k1 + 2*k2 + 2*k3 + k4)/6
+        k1 = dt * fn(y, t)
+        k2 = dt * fn(y + k1 / 2, t + dt / 2)
+        k3 = dt * fn(y + k2 / 2, t + dt / 2)
+        k4 = dt * fn(y + k3, t + dt)
+        y = y + (k1 + 2 * k2 + 2 * k3 + k4) / 6
         t = t + dt
     end
     y
 end
 
-@inline mod2piF(x::T) where {T} = mod(x, T(2*pi))
+@inline mod2piF(x::T) where {T} = mod(x, T(2 * pi))
 @inline wrap_pi(x) = mod2piF(x + pi) - pi
 @inline adiff(x, y) = wrap_pi(x - y)
