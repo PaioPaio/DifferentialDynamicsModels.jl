@@ -159,7 +159,7 @@ propagate(f::SingleIntegratorDynamics{N}, x::State, c::RampControl{N}) where {N}
 
 LinearAlgebra.issymmetric(bvp::SteeringBVP{<:SingleIntegratorDynamics,<:CostFunctional,<:BoundedControlNorm}) = true
 
-# GeometricSteering = Planning a Grafo
+# GeometricSteering = Planning a Graph
 const GeometricSteering{N,T} = SteeringBVP{SingleIntegratorDynamics{N},Time,BoundedControlNorm{2,T},SteeringCache}
 const SingleIntegratorSteering{N,T} = GeometricSteering{N,T}
 GeometricSteering{N}(b=1) where {N} = SteeringBVP(SingleIntegratorDynamics{N}(), Time(), constraints=BoundedControlNorm(b))
@@ -170,7 +170,7 @@ GeometricSteering(N, b=1) = GeometricSteering{N}(b)
 #general fallback
 #(bvp::SteeringBVP)(x0::State, xf::State, cost_bound::Number=100.0) = (bvp::SteeringBVP)(x0, xf)
 
-# 
+# actual fallbacks
 (bvp::SteeringBVP{<:DifferentialDynamics,<:CostFunctional,<:SteeringConstraints,<:SteeringCache})(x0::State, xf::State) = getcostandcontrol(bvp.dynamics, bvp.cost, bvp.constraints, bvp.cache, x0, xf)
 
 (bvp::SteeringBVP{<:DifferentialDynamics,<:CostFunctional,<:SteeringConstraints,<:SteeringCache})(x0::State, xf::State, cost_bound::Missing) = getcostandcontrol(bvp.dynamics, bvp.cost, bvp.constraints, bvp.cache, x0, xf)
