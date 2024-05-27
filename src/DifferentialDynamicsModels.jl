@@ -17,9 +17,9 @@ include("utils.jl")
 
 # States, Controls, Dynamics, Cost Functionals, and Control Intervals
 abstract type AbstractState end
-const State = Union{AbstractState,AbstractVector{<:Number},SVector{<:Number}}
+const State = Union{AbstractState,AbstractVector{<:Number},}
 abstract type AbstractControl end
-const Control = Union{AbstractControl,AbstractVector{<:Number},SVector{<:Number}}
+const Control = Union{AbstractControl,AbstractVector{<:Number}}
 abstract type DifferentialDynamics end
 abstract type CostFunctional end
 struct Time <: CostFunctional end
@@ -64,10 +64,10 @@ end
 propagate(f::DifferentialDynamics, x::State, c::ControlInterval) = propagate_ode(f, x, c)    # general fallback
 
 ## Step Control
-struct StepControl{N,T,S<:StaticVector{N}} <: ControlInterval
+struct StepControl{N,T,S<:AbstractVector{N}} <: ControlInterval
     t::T
     u::S
-    function (::Type{SC})(t::T, u::S) where {N,T,S<:StaticVector{N},SC<:StepControl}
+    function (::Type{SC})(t::T, u::S) where {N,T,S<:AbstractVector{N},SC<:StepControl}
         new{N,T,S}(t, u)
     end
 end
@@ -83,11 +83,11 @@ instantaneous_control(c::StepControl, s::Number) = c.u
 (cost::TimePlusQuadraticControl)(c::StepControl) = c.t * (1 + c.u' * cost.R * c.u)
 
 ## Ramp Control
-struct RampControl{N,T,S0<:StaticVector{N},Sf<:StaticVector{N}} <: ControlInterval
+struct RampControl{N,T,S0<:AbstractVector{N},Sf<:AbstractVector{N}} <: ControlInterval
     t::T
     u0::S0
     uf::Sf
-    function (::Type{RC})(t::T, u0::S0, uf::Sf) where {N,T,S0<:StaticVector{N},Sf<:StaticVector{N},RC<:RampControl}
+    function (::Type{RC})(t::T, u0::S0, uf::Sf) where {N,T,S0<:AbstractVector{N},Sf<:AbstractVector{N},RC<:RampControl}
         new{N,T,S0,Sf}(t, u0, uf)
     end
 end
@@ -151,7 +151,7 @@ state_dim(::SingleIntegratorDynamics{N}) where {N} = N
 control_dim(::SingleIntegratorDynamics{N}) where {N} = N
 
 
-(::SingleIntegratorDynamics{N})(x::StaticVector{N}, u::StaticVector{N}) where {N} = u
+(::SingleIntegratorDynamics{N})(x::AbstractVector{N}, u::AbstractVector{N}) where {N} = u
 propagate(f::SingleIntegratorDynamics{N}, x::State, c::StepControl) where {N} = x + c.t * c.u
 # do not be fooled by the uniform motion formula, this moves maximum by a radius 
 propagate(f::SingleIntegratorDynamics{N}, x::State, c::RampControl{N}) where {N} = x + c.t * (c.u0 + c.uf) / 2
@@ -182,7 +182,7 @@ function getcostandcontrol(dynamics::SingleIntegratorDynamics{N}, cost::Time, co
 
     # "Time" in this case is the number of potential steps to reach xf in a straight line, so the norm ratio the maximum radius (given by a spherical bound)  
     c = norm(xf - x0) / constraints.b
-    ctrl = StepControl(c, SVector{size(x0)[1]}((xf - x0) * (c > 0 ? inv(c) : 0)))    # @benchmark appears faster than ifelse
+    ctrl = StepControl(c, SVector(((xf - x0) * (c > 0 ? inv(c) : 0))...))    # @benchmark appears faster than ifelse
     (cost=c, controls=ctrl)
 end
 getcostandcontrol(dynamics::SingleIntegratorDynamics{N}, cost::Time, constraints, cache, x0::State, xf::State, cost_bound::T) where {N,T} = getcostandcontrol(dynamics::SingleIntegratorDynamics{N}, cost::Time, constraints, cache, x0::State, xf::State)
